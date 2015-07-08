@@ -7,4 +7,4 @@ script:
   - tox
 notifications:
   email:
-  - ci-notify@openlabs.co.in
+  - ci-notify@fulfil.io
