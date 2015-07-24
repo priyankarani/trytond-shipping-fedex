@@ -10,6 +10,7 @@ from trytond.model import ModelView, fields
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
 from trytond.rpc import RPC
+from trytond.transaction import Transaction
 
 from fedex import RateService, ProcessShipmentRequest
 from fedex.exceptions import RequestError
@@ -109,7 +110,8 @@ class ShipmentOut:
         })
 
     def on_change_carrier(self):
-        res = super(ShipmentOut, self).on_change_carrier()
+        with Transaction().set_context(ignore_carrier_computation=True):
+            res = super(ShipmentOut, self).on_change_carrier()
 
         res['is_fedex_shipping'] = self.carrier and \
             self.carrier.carrier_cost_method == 'fedex'
