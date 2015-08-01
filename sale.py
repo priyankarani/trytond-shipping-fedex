@@ -79,7 +79,6 @@ class Sale:
     def __setup__(self):
         super(Sale, self).__setup__()
         self._error_messages.update({
-            'warehouse_address_required': 'Warehouse address is required.',
             'fedex_settings_missing': 'FedEx settings on this sale are missing',
             'fedex_rates_error':
                 "Error while getting rates from Fedex: \n\n%s"
@@ -202,10 +201,6 @@ class Sale:
             fedex_credentials.AccountNumber
 
         ship_from_address = self._get_ship_from_address()
-        # From location is the warehouse location. So it must be filled.
-        if ship_from_address is None:
-            self.raise_user_error('warehouse_address_required')
-
         ship_from_address.set_fedex_address(requested_shipment.Shipper)
         self.shipment_address.set_fedex_address(requested_shipment.Recipient)
 
@@ -277,12 +272,13 @@ class Sale:
 
             weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
 
+            from_address = self._get_ship_from_address()
+
             commodity = fedex_request.get_element_from_type('Commodity')
             commodity.NumberOfPieces = len(self.lines)
             commodity.Name = line.product.name
             commodity.Description = line.description
-            commodity.CountryOfManufacture = \
-                self.warehouse.address.country.code
+            commodity.CountryOfManufacture = from_address.country.code
             commodity.Weight.Units = 'LB'
             commodity.Weight.Value = line.get_weight(weight_uom)
             commodity.Quantity = int(line.product.quantity)

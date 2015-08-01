@@ -92,7 +92,6 @@ class ShipmentOut:
             'readonly': ~Eval('state').in_(['packed', 'done']),
         }
         cls._error_messages.update({
-            'warehouse_address_required': 'Warehouse address is required.',
             'error_label': 'Error in generating label "%s"',
             'fedex_settings_missing':
                 'FedEx settings on this sale are missing',
@@ -155,10 +154,8 @@ class ShipmentOut:
         # Shipper and Recipient
         requested_shipment.Shipper.AccountNumber = \
             fedex_credentials.AccountNumber
-        # From location is the warehouse location. So it must be filled.
-        if not self.warehouse.address:
-            self.raise_user_error('warehouse_address_required')
-        self.warehouse.address.set_fedex_address(requested_shipment.Shipper)
+        from_address = self._get_ship_from_address()
+        from_address.set_fedex_address(requested_shipment.Shipper)
         self.delivery_address.set_fedex_address(requested_shipment.Recipient)
 
         # Shipping Charges Payment
@@ -215,6 +212,8 @@ class ShipmentOut:
 
         weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
 
+        from_address = self._get_ship_from_address()
+
         # Encoding Items for customs
         commodities = []
         customs_value = 0
@@ -226,8 +225,7 @@ class ShipmentOut:
             commodity.Name = move.product.name
             commodity.Description = move.product.description or \
                 move.product.name
-            commodity.CountryOfManufacture = \
-                self.warehouse.address.country.code
+            commodity.CountryOfManufacture = from_address.country.code
             commodity.Weight.Units = 'LB'
             commodity.Weight.Value = int(move.get_weight(weight_uom))
             commodity.Quantity = int(move.quantity)
@@ -295,10 +293,8 @@ class ShipmentOut:
         requested_shipment.Shipper.AccountNumber = \
             fedex_credentials.AccountNumber
 
-        if not self.warehouse.address:
-            self.raise_user_error('warehouse_address_required')
-
-        self.warehouse.address.set_fedex_address(requested_shipment.Shipper)
+        from_address = self._get_ship_from_address()
+        from_address.set_fedex_address(requested_shipment.Shipper)
         self.delivery_address.set_fedex_address(requested_shipment.Recipient)
 
         # Shipping Charges Payment
