@@ -10,12 +10,6 @@
             <field name="fedex_account_number"/>
             <label name="fedex_meter_number"/>
             <field name="fedex_meter_number"/>
-            <label name="fedex_integrator_id"/>
-            <field name="fedex_integrator_id"/>
-            <label name="fedex_product_id"/>
-            <field name="fedex_product_id"/>
-            <label name="fedex_product_version"/>
-            <field name="fedex_product_version"/>
         </group>
     </xpath>
 </data>

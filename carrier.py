@@ -43,11 +43,6 @@ class Carrier:
         'Account Number', states=REQUIRED_IF_FEDEX
     )
     fedex_meter_number = fields.Char('Meter Number', states=REQUIRED_IF_FEDEX)
-    fedex_integrator_id = fields.Char('Integrator ID', states=REQUIRED_IF_FEDEX)
-    fedex_product_id = fields.Char('Product ID', states=REQUIRED_IF_FEDEX)
-    fedex_product_version = fields.Char(
-        'Product Version', states=REQUIRED_IF_FEDEX
-    )
 
     @classmethod
     def __setup__(cls):
@@ -69,8 +64,6 @@ class Carrier:
         if not all([
             self.fedex_key, self.fedex_account_number,
             self.fedex_password, self.fedex_meter_number,
-            self.fedex_integrator_id, self.fedex_product_id,
-            self.fedex_product_version
         ]):
             self.raise_user_error('fedex_settings_missing')
 
@@ -79,18 +72,12 @@ class Carrier:
             'Password',
             'AccountNumber',
             'MeterNumber',
-            'IntegratorId',
-            'ProductId',
-            'ProductVersion'
         ])
         return FedexSettings(
             self.fedex_key,
             self.fedex_password,
             self.fedex_account_number,
             self.fedex_meter_number,
-            self.fedex_integrator_id,
-            self.fedex_product_id,
-            self.fedex_product_version,
         )
 
     def get_sale_price(self):

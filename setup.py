@@ -20,7 +20,7 @@ major_version = int(major_version)
 minor_version = int(minor_version)
 
 requires = [
-    'pyfedex',
+    'pyfedex>=1.3',
 ]
 
 MODULE2PREFIX = {
