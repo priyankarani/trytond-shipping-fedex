@@ -35,7 +35,7 @@ class ShipmentOut:
         domain=[('method_type', '=', 'dropoff')],
         states={
             'required': Eval('is_fedex_shipping', True),
-            'readonly': ~Eval('state').in_(['packed', 'done']),
+            'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
@@ -44,7 +44,7 @@ class ShipmentOut:
         domain=[('method_type', '=', 'packaging')],
         states={
             'required': Eval('is_fedex_shipping', True),
-            'readonly': ~Eval('state').in_(['packed', 'done']),
+            'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
@@ -53,7 +53,7 @@ class ShipmentOut:
         domain=[('method_type', '=', 'service')],
         states={
             'required': Eval('is_fedex_shipping', True),
-            'readonly': ~Eval('state').in_(['packed', 'done']),
+            'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
