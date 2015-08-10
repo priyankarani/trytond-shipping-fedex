@@ -272,6 +272,7 @@ def dataset(request):
             'fedex_account_number': '510088000',
             'fedex_password': 'blDSZptRcXwqg3VTSJcU9xNbc',
             'fedex_meter_number': '118518591',
+            'fedex_is_test': True,
         }])
 
         # Create customer

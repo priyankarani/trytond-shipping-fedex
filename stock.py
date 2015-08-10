@@ -6,18 +6,22 @@
 from decimal import Decimal
 import base64
 
-from trytond.model import ModelView, fields
+from trytond.model import fields
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
 from trytond.rpc import RPC
 from trytond.transaction import Transaction
 
-from fedex import RateService, ProcessShipmentRequest
-from fedex.exceptions import RequestError
+from fedex.services.rate_service import FedexRateServiceRequest
+from fedex.services.ship_service import FedexProcessShipmentRequest
+from fedex.base_service import FedexError
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('suds.client').setLevel(logging.DEBUG)
 
 __all__ = [
-    'ShipmentOut', 'GenerateFedexLabelMessage', 'GenerateShippingLabel',
+    'ShipmentOut', 'GenerateShippingLabel',
 ]
 __metaclass__ = PoolMeta
 
@@ -92,7 +96,7 @@ class ShipmentOut:
             'readonly': ~Eval('state').in_(['packed', 'done']),
         }
         cls._error_messages.update({
-            'error_label': 'Error in generating label "%s"',
+            'error_label': 'Error in generating label: \n\n%s',
             'fedex_settings_missing':
                 'FedEx settings on this sale are missing',
             'tracking_number_already_present':
@@ -130,10 +134,9 @@ class ShipmentOut:
 
     def get_fedex_shipping_cost(self):
         """Returns the calculated shipping cost as sent by fedex
-
-        :returns: The shipping cost in USD
+        :returns: The shipping cost
         """
-        Currency = Pool().get('currency.currency')
+        ProductUom = Pool().get('product.uom')
 
         fedex_credentials = self.carrier.get_fedex_credentials()
 
@@ -143,114 +146,51 @@ class ShipmentOut:
         ]):
             self.raise_user_error('fedex_settings_missing')
 
-        rate_request = RateService(fedex_credentials)
-        requested_shipment = rate_request.RequestedShipment
+        rate_request = FedexRateServiceRequest(fedex_credentials)
+        rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
+        rate_request.RequestedShipment.ServiceType = self.fedex_service_type.value
+        rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        rate_request.RequestedShipment.PreferredCurrency = self.cost_currency.code
 
-        requested_shipment.DropoffType = self.fedex_drop_off_type.value
-        requested_shipment.ServiceType = self.fedex_service_type.value
-        requested_shipment.PackagingType = self.fedex_packaging_type.value
-        requested_shipment.PreferredCurrency = self.cost_currency.code
+        # Shipper's address
+        shipper_address = self._get_ship_from_address()
+        rate_request.RequestedShipment.Shipper.Address.PostalCode = shipper_address.zip
+        rate_request.RequestedShipment.Shipper.Address.CountryCode = shipper_address.country.code
+        rate_request.RequestedShipment.Shipper.Address.Residential = False
 
-        # Shipper and Recipient
-        requested_shipment.Shipper.AccountNumber = \
-            fedex_credentials.AccountNumber
-        from_address = self._get_ship_from_address()
-        from_address.set_fedex_address(requested_shipment.Shipper)
-        self.delivery_address.set_fedex_address(requested_shipment.Recipient)
+        # Recipient address
+        rate_request.RequestedShipment.Recipient.Address.PostalCode = self.delivery_address.zip
+        rate_request.RequestedShipment.Recipient.Address.CountryCode = self.delivery_address.country.code
 
-        # Shipping Charges Payment
-        shipping_charges = requested_shipment.ShippingChargesPayment
-        shipping_charges.PaymentType = 'SENDER'
-        shipping_charges.Payor.ResponsibleParty = requested_shipment.Shipper
+        # Include estimated duties and taxes in rate quote, can be ALL or NONE
+        rate_request.RequestedShipment.EdtRequestType = 'NONE'
 
-        # Express Freight Detail
-        fright_detail = requested_shipment.ExpressFreightDetail
-        fright_detail.PackingListEnclosed = 1
-        fright_detail.ShippersLoadAndCount = 2
-        fright_detail.BookingConfirmationNumber = 'Ref-%s' % self.reference
-
-        # Customs Clearance Detail
-        self.get_fedex_customs_details(rate_request)
-
-        # Label Specification
-        requested_shipment.LabelSpecification.LabelFormatType = 'COMMON2D'
-        requested_shipment.LabelSpecification.ImageType = 'PNG'
-        requested_shipment.LabelSpecification.LabelStockType = 'PAPER_4X6'
-
-        requested_shipment.RateRequestTypes = ['ACCOUNT']
-
-        self.get_fedex_items_details(rate_request)
-
-        try:
-            response = rate_request.send_request(int(self.id))
-        except RequestError, exc:
-            self.raise_user_error(
-                'fedex_shipping_cost_error', error_args=(exc.message, )
-            )
-
-        currency, = Currency.search([
-            ('code', '=', str(
-                response.RateReplyDetails[0].RatedShipmentDetails[0].
-                ShipmentRateDetail.TotalNetCharge.Currency
-            ))
-        ])
-
-        return Decimal(str(
-            response.RateReplyDetails[0].RatedShipmentDetails[0].ShipmentRateDetail.TotalNetCharge.Amount  # noqa
-        )), currency.id
-
-    def get_fedex_customs_details(self, fedex_request):
-        """
-        Computes the details of the customs items and passes to fedex request
-        """
-        ProductUom = Pool().get('product.uom')
-
-        customs_detail = fedex_request.get_element_from_type(
-            'CustomsClearanceDetail'
-        )
-        customs_detail.DocumentContent = 'DOCUMENTS_ONLY'
+        # Who pays for the rate_request?
+        # RECIPIENT, SENDER or THIRD_PARTY
+        rate_request.RequestedShipment.ShippingChargesPayment.PaymentType = 'SENDER'
 
         weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
 
-        from_address = self._get_ship_from_address()
+        package_weight = rate_request.create_wsdl_object_of_type('Weight')
+        package_weight.Value = float("%.2f" % self._get_total_weight(weight_uom))
+        package_weight.Units = "LB"
+        package = rate_request.create_wsdl_object_of_type('RequestedPackageLineItem')
+        package.Weight = package_weight
+        # Can be other values this is probably the most common
+        package.PhysicalPackaging = 'BOX'
+        package.GroupPackageCount = 1
 
-        # Encoding Items for customs
-        commodities = []
-        customs_value = 0
-        for move in self.outgoing_moves:
-            if move.product.type == 'service':
+        rate_request.add_package(package)
+
+        try:
+            rate_request.send_request()
+        except FedexError, error:
+            self.raise_user_error("fedex_shipping_cost_error", error_args=(error, ))
+
+        for rate_detail in rate_request.response.RateReplyDetails[0].RatedShipmentDetails:
+            if rate_detail.ShipmentRateDetail.TotalNetFedExCharge.Currency != self.currency.code:
                 continue
-            commodity = fedex_request.get_element_from_type('Commodity')
-            commodity.NumberOfPieces = len(self.outgoing_moves)
-            commodity.Name = move.product.name
-            commodity.Description = move.product.description or \
-                move.product.name
-            commodity.CountryOfManufacture = from_address.country.code
-            commodity.Weight.Units = 'LB'
-            commodity.Weight.Value = int(move.get_weight(weight_uom))
-            commodity.Quantity = int(move.quantity)
-            commodity.QuantityUnits = 'EA'
-            commodity.UnitPrice.Amount = int(move.unit_price)
-            commodity.UnitPrice.Currency = self.company.currency.code
-            commodity.CustomsValue.Currency = self.company.currency.code
-            commodity.CustomsValue.Amount = int(
-                Decimal(str(move.quantity)) * move.unit_price
-            )
-            commodities.append(commodity)
-            customs_value += Decimal(str(move.quantity)) * move.unit_price
-
-        customs_detail.CustomsValue.Currency = self.company.currency.code
-        customs_detail.CustomsValue.Amount = int(customs_value)
-
-        # Commercial Invoice
-        customs_detail.CommercialInvoice.TermsOfSale = 'FOB'
-        customs_detail.DutiesPayment.PaymentType = 'SENDER'
-        customs_detail.DutiesPayment.Payor.ResponsibleParty = \
-            fedex_request.RequestedShipment.Shipper
-
-        fedex_request.RequestedShipment.CustomsClearanceDetail = customs_detail
-        fedex_request.RequestedShipment.CustomsClearanceDetail.Commodities = \
-            commodities
+            return Decimal(rate_detail.ShipmentRateDetail.TotalNetFedExCharge.Amount), self.currency.id
 
     def make_fedex_labels(self):
         """
@@ -260,8 +200,8 @@ class ShipmentOut:
         """
         Currency = Pool().get('currency.currency')
         Attachment = Pool().get('ir.attachment')
-        Package = Pool().get('stock.package')
         Uom = Pool().get('product.uom')
+        Company = Pool().get('company.company')
 
         if self.state not in ('packed', 'done'):
             self.raise_user_error('invalid_state')
@@ -274,93 +214,102 @@ class ShipmentOut:
 
         fedex_credentials = self.carrier.get_fedex_credentials()
 
-        ship_request = ProcessShipmentRequest(fedex_credentials)
-        requested_shipment = ship_request.RequestedShipment
+        ship_request = FedexProcessShipmentRequest(fedex_credentials)
+        ship_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
+        ship_request.RequestedShipment.ServiceType = self.fedex_service_type.value
+        ship_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
 
-        requested_shipment.DropoffType = self.fedex_drop_off_type.value
-        requested_shipment.ServiceType = self.fedex_service_type.value
-        requested_shipment.PackagingType = self.fedex_packaging_type.value
+        company = Company(Transaction().context.get('company'))
+        shipper_address = self._get_ship_from_address()
+
+        # Shipper contact info.
+        ship_request.RequestedShipment.Shipper.Contact.PersonName = shipper_address.name
+        ship_request.RequestedShipment.Shipper.Contact.CompanyName = company.party.name
+        ship_request.RequestedShipment.Shipper.Contact.PhoneNumber = shipper_address.party.phone
+
+        # Shipper address.
+        ship_request.RequestedShipment.Shipper.Address.StreetLines = [
+            shipper_address.street or '', shipper_address.streetbis or ''
+        ]
+        ship_request.RequestedShipment.Shipper.Address.City = shipper_address.city
+        ship_request.RequestedShipment.Shipper.Address.StateOrProvinceCode = shipper_address.subdivision.code[-2:]
+        ship_request.RequestedShipment.Shipper.Address.PostalCode = shipper_address.zip
+        ship_request.RequestedShipment.Shipper.Address.CountryCode = shipper_address.country.code
+        ship_request.RequestedShipment.Shipper.Address.Residential = False
+
+        # Recipient contact info.
+        ship_request.RequestedShipment.Recipient.Contact.PersonName = self.customer.name
+        ship_request.RequestedShipment.Recipient.Contact.PhoneNumber = self.customer.phone
+
+        # Recipient address
+        ship_request.RequestedShipment.Recipient.Address.StreetLines = [
+            self.delivery_address.street or '',
+            self.delivery_address.streetbis or ''
+        ]
+        ship_request.RequestedShipment.Recipient.Address.City = self.delivery_address.city
+        ship_request.RequestedShipment.Recipient.Address.StateOrProvinceCode = self.delivery_address.subdivision.code[-2:]
+        ship_request.RequestedShipment.Recipient.Address.PostalCode = self.delivery_address.zip
+        ship_request.RequestedShipment.Recipient.Address.CountryCode = self.delivery_address.country.code
+
+        # This is needed to ensure an accurate rate quote with the response.
+        ship_request.RequestedShipment.Recipient.Address.Residential = True
+        ship_request.RequestedShipment.EdtRequestType = 'NONE'
+
+        ship_request.RequestedShipment.ShippingChargesPayment.Payor.ResponsibleParty.AccountNumber = fedex_credentials.account_number
+        ship_request.RequestedShipment.ShippingChargesPayment.Payor.ResponsibleParty.Contact = ship_request.RequestedShipment.Shipper.Contact
+
+        ship_request.RequestedShipment.ShippingChargesPayment.PaymentType = 'SENDER'
+        ship_request.RequestedShipment.LabelSpecification.LabelFormatType = 'COMMON2D'
+        ship_request.RequestedShipment.LabelSpecification.ImageType = 'PNG'
+        ship_request.RequestedShipment.LabelSpecification.LabelStockType = 'PAPER_4X6'
+        ship_request.RequestedShipment.LabelSpecification.LabelPrintingOrientation = 'BOTTOM_EDGE_OF_TEXT_FIRST'
+
+        if self.is_international_shipping:
+            self._set_fedex_customs_details(ship_request)
 
         uom_pound, = Uom.search([('symbol', '=', 'lb')])
 
-        if len(self.packages) > 1:
-            requested_shipment.TotalWeight.Units = 'LB'
-            requested_shipment.TotalWeight.Value = Uom.compute_qty(
-                self.weight_uom, self.weight, uom_pound
-            )
-
-        # Shipper & Recipient
-        requested_shipment.Shipper.AccountNumber = \
-            fedex_credentials.AccountNumber
-
-        from_address = self._get_ship_from_address()
-        from_address.set_fedex_address(requested_shipment.Shipper)
-        self.delivery_address.set_fedex_address(requested_shipment.Recipient)
-
-        # Shipping Charges Payment
-        shipping_charges = requested_shipment.ShippingChargesPayment
-        shipping_charges.PaymentType = 'SENDER'
-        shipping_charges.Payor.ResponsibleParty = requested_shipment.Shipper
-
-        # Express Freight Detail
-        fright_detail = requested_shipment.ExpressFreightDetail
-        fright_detail.PackingListEnclosed = 1  # XXX
-        fright_detail.ShippersLoadAndCount = 2  # XXX
-        fright_detail.BookingConfirmationNumber = 'Ref-%s' % self.reference
-
-        if self.is_international_shipping:
-            # Customs Clearance Detail
-            self.get_fedex_customs_details(ship_request)
-
-        # Label Specification
-        # Maybe make them as configurable items in later versions
-        requested_shipment.LabelSpecification.LabelFormatType = 'COMMON2D'
-        requested_shipment.LabelSpecification.ImageType = 'PNG'
-        requested_shipment.LabelSpecification.LabelStockType = 'PAPER_4X6'
-
-        requested_shipment.RateRequestTypes = ['ACCOUNT']
-
         master_tracking_number = None
+        ship_request.RequestedShipment.PackageCount = len(self.packages)
+        ship_request.RequestedShipment.TotalWeight.Units = 'LB'
+        ship_request.RequestedShipment.TotalWeight.Value = float("%.2f" % Uom.compute_qty(
+            self.weight_uom, self.weight, uom_pound
+        ))
 
         for index, package in enumerate(self.packages, start=1):
-            item = ship_request.get_element_from_type(
-                'RequestedPackageLineItem'
-            )
-            item.SequenceNumber = index
-
-            # TODO: some country needs item.ItemDescription
-
-            item.Weight.Units = 'LB'
-            item.Weight.Value = Uom.compute_qty(
-                package.weight_uom, package.weight, uom_pound
-            )
-
-            ship_request.RequestedShipment.RequestedPackageLineItems = [item]
-            ship_request.RequestedShipment.PackageCount = len(self.packages)
-
             if master_tracking_number is not None:
-                tracking_id = ship_request.get_element_from_type(
+                tracking_id = ship_request.create_wsdl_object_of_type(
                     'TrackingId'
                 )
                 tracking_id.TrackingNumber = master_tracking_number
+                tracking_id.TrackingIdType = 'EXPRESS'
                 ship_request.RequestedShipment.MasterTrackingId = tracking_id
 
+            package_weight = ship_request.create_wsdl_object_of_type('Weight')
+            package_weight.Value = float("%.2f" % Uom.compute_qty(
+                package.weight_uom, package.weight, uom_pound
+            ))
+            package_weight.Units = "LB"
+
+            package_item = ship_request.create_wsdl_object_of_type('RequestedPackageLineItem')
+            package_item.PhysicalPackaging = 'BOX'
+            package_item.Weight = package_weight
+            package_item.SequenceNumber = index
+            ship_request.RequestedShipment.RequestedPackageLineItems = [package_item]
+
             try:
-                response = ship_request.send_request(str(self.id))
-            except RequestError, error:
-                self.raise_user_error('error_label', error_args=(error,))
+                ship_request.send_request()
+            except FedexError, error:
+                self.raise_user_error("error_label", error_args=(error, ))
 
-            package_details = response.CompletedShipmentDetail.CompletedPackageDetails  # noqa
-            tracking_number = package_details[0].TrackingIds[0].TrackingNumber
-
-            if self.packages.index(package) == 0:
+            tracking_number = ship_request.response.CompletedShipmentDetail.CompletedPackageDetails[0].TrackingIds[0].TrackingNumber
+            if index == 1:
                 master_tracking_number = tracking_number
 
-            Package.write([package], {
-                'tracking_number': tracking_number,
-            })
+            package.tracking_number = tracking_number
+            package.save()
 
-            for id, image in enumerate(package_details[0].Label.Parts):
+            for id, image in enumerate(ship_request.response.CompletedShipmentDetail.CompletedPackageDetails[0].Label.Parts):
                 Attachment.create([{
                     'name': "%s_%s_Fedex.png" % (tracking_number, id),
                     'type': 'data',
@@ -370,14 +319,12 @@ class ShipmentOut:
 
         currency, = Currency.search([
             ('code', '=', str(
-                response.CompletedShipmentDetail.ShipmentRating.
-                ShipmentRateDetails[0].TotalNetCharge.Currency
+                ship_request.response.CompletedShipmentDetail.ShipmentRating.ShipmentRateDetails[0].TotalNetCharge.Currency
             ))
         ])
         self.__class__.write([self], {
             'cost': Decimal(str(
-                response.CompletedShipmentDetail.ShipmentRating.
-                ShipmentRateDetails[0].TotalNetCharge.Amount
+                ship_request.response.CompletedShipmentDetail.ShipmentRating.ShipmentRateDetails[0].TotalNetCharge.Amount
             )),
             'cost_currency': currency,
             'tracking_number': master_tracking_number,
@@ -385,12 +332,58 @@ class ShipmentOut:
 
         return master_tracking_number
 
+    def _set_fedex_customs_details(self, ship_request):
+        """
+        Computes the details of the customs items and passes to fedex request
+        """
+        ProductUom = Pool().get('product.uom')
 
-class GenerateFedexLabelMessage(ModelView):
-    'Generate Fedex Labels Message'
-    __name__ = 'generate.fedex.label.message'
+        customs_detail = ship_request.create_wsdl_object_of_type(
+            'CustomsClearanceDetail'
+        )
+        customs_detail.DocumentContent = 'DOCUMENTS_ONLY'
+        customs_detail.__delattr__('FreightOnValue')
+        customs_detail.__delattr__('ClearanceBrokerage')
 
-    tracking_number = fields.Char("Tracking number", readonly=True)
+        weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
+
+        from_address = self._get_ship_from_address()
+
+        # Encoding Items for customs
+        commodities = []
+        customs_value = 0
+        for move in self.outgoing_moves:
+            if move.product.type == 'service':
+                continue
+            commodity = ship_request.create_wsdl_object_of_type('Commodity')
+            commodity.NumberOfPieces = len(self.outgoing_moves)
+            commodity.Name = move.product.name
+            commodity.Description = move.product.description or \
+                move.product.name
+            commodity.CountryOfManufacture = from_address.country.code
+            commodity.Weight.Units = 'LB'
+            commodity.Weight.Value = float("%.2f" % move.get_weight(weight_uom))
+            commodity.Quantity = int(move.quantity)
+            commodity.QuantityUnits = 'EA'
+            commodity.UnitPrice.Amount = move.unit_price.quantize(Decimal('.01'))
+            commodity.UnitPrice.Currency = self.company.currency.code
+            commodity.CustomsValue.Currency = self.company.currency.code
+            commodity.CustomsValue.Amount = (Decimal(str(move.quantity)) * move.unit_price).quantize(Decimal('.01'))
+            commodities.append(commodity)
+            customs_value += Decimal(str(move.quantity)) * move.unit_price
+
+        customs_detail.CustomsValue.Currency = self.company.currency.code
+        customs_detail.CustomsValue.Amount = customs_value.quantize(Decimal('.01'))
+        customs_detail.Commodities = commodities
+
+        # Commercial Invoice
+        customs_detail.CommercialInvoice.TermsOfSale = 'FOB_OR_FCA'
+        customs_detail.CommercialInvoice.TaxesOrMiscellaneousChargeType = 'OTHER'
+        customs_detail.CommercialInvoice.Purpose = "SAMPLE"
+        customs_detail.DutiesPayment.PaymentType = 'SENDER'
+        customs_detail.DutiesPayment.Payor = ship_request.RequestedShipment.ShippingChargesPayment.Payor
+
+        ship_request.RequestedShipment.CustomsClearanceDetail = customs_detail
 
 
 class GenerateShippingLabel:

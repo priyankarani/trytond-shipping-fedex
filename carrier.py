@@ -4,12 +4,12 @@
 
 """
 from decimal import Decimal
-from collections import namedtuple
 
 from trytond.pool import PoolMeta, Pool
 from trytond.model import ModelSQL, ModelView, fields
 from trytond.transaction import Transaction
 from trytond.pyson import Eval
+from fedex.config import FedexConfig
 
 
 REQUIRED_IF_FEDEX = {
@@ -43,6 +43,7 @@ class Carrier:
         'Account Number', states=REQUIRED_IF_FEDEX
     )
     fedex_meter_number = fields.Char('Meter Number', states=REQUIRED_IF_FEDEX)
+    fedex_is_test = fields.Boolean('Is Test Account?')
 
     @classmethod
     def __setup__(cls):
@@ -58,8 +59,7 @@ class Carrier:
     def get_fedex_credentials(self):
         """
         Returns the fedex account credentials in tuple
-        :return: (key, account_number, password, meter_number, integrator_id,
-            product_id, product_version)
+        :return: FedexConfig object
         """
         if not all([
             self.fedex_key, self.fedex_account_number,
@@ -67,17 +67,12 @@ class Carrier:
         ]):
             self.raise_user_error('fedex_settings_missing')
 
-        FedexSettings = namedtuple('FedexSettings', [
-            'Key',
-            'Password',
-            'AccountNumber',
-            'MeterNumber',
-        ])
-        return FedexSettings(
-            self.fedex_key,
-            self.fedex_password,
-            self.fedex_account_number,
-            self.fedex_meter_number,
+        return FedexConfig(
+            key=self.fedex_key,
+            password=self.fedex_password,
+            account_number=self.fedex_account_number,
+            meter_number=self.fedex_meter_number,
+            use_test_server=self.fedex_is_test
         )
 
     def get_sale_price(self):

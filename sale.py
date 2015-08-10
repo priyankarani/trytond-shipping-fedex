@@ -10,8 +10,8 @@ from trytond.pool import PoolMeta, Pool
 from trytond.pyson import Eval
 from trytond.transaction import Transaction
 
-from fedex import RateService
-from fedex.exceptions import RequestError
+from fedex.services.rate_service import FedexRateServiceRequest
+from fedex.base_service import FedexError
 
 __all__ = ['Configuration', 'Sale']
 __metaclass__ = PoolMeta
@@ -176,9 +176,9 @@ class Sale:
 
     def get_fedex_shipping_cost(self):
         """Returns the calculated shipping cost as sent by fedex
-        :returns: The shipping cost in USD
+        :returns: The shipping cost
         """
-        Currency = Pool().get('currency.currency')
+        ProductUom = Pool().get('product.uom')
 
         fedex_credentials = self.carrier.get_fedex_credentials()
 
@@ -188,145 +188,52 @@ class Sale:
         ]):
             self.raise_user_error('fedex_settings_missing')
 
-        rate_request = RateService(fedex_credentials)
-        requested_shipment = rate_request.RequestedShipment
+        rate_request = FedexRateServiceRequest(fedex_credentials)
+        rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
+        rate_request.RequestedShipment.ServiceType = self.fedex_service_type.value
+        rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        rate_request.RequestedShipment.PreferredCurrency = self.currency.code
 
-        requested_shipment.DropoffType = self.fedex_drop_off_type.value
-        requested_shipment.ServiceType = self.fedex_service_type.value
-        requested_shipment.PackagingType = self.fedex_packaging_type.value
-        requested_shipment.PreferredCurrency = self.currency.code
+        # Shipper's address
+        shipper_address = self._get_ship_from_address()
+        rate_request.RequestedShipment.Shipper.Address.PostalCode = shipper_address.zip
+        rate_request.RequestedShipment.Shipper.Address.CountryCode = shipper_address.country.code
+        rate_request.RequestedShipment.Shipper.Address.Residential = False
 
-        # Shipper and Recipient
-        requested_shipment.Shipper.AccountNumber = \
-            fedex_credentials.AccountNumber
+        # Recipient address
+        rate_request.RequestedShipment.Recipient.Address.PostalCode = self.shipment_address.zip
+        rate_request.RequestedShipment.Recipient.Address.CountryCode = self.shipment_address.country.code
 
-        ship_from_address = self._get_ship_from_address()
-        ship_from_address.set_fedex_address(requested_shipment.Shipper)
-        self.shipment_address.set_fedex_address(requested_shipment.Recipient)
+        # Include estimated duties and taxes in rate quote, can be ALL or NONE
+        rate_request.RequestedShipment.EdtRequestType = 'NONE'
 
-        # Shipping Charges Payment
-        shipping_charges = requested_shipment.ShippingChargesPayment
-        shipping_charges.PaymentType = 'SENDER'
-        shipping_charges.Payor.ResponsibleParty = requested_shipment.Shipper
+        # Who pays for the rate_request?
+        # RECIPIENT, SENDER or THIRD_PARTY
+        rate_request.RequestedShipment.ShippingChargesPayment.PaymentType = \
+            'SENDER'
 
-        # Express Freight Detail
-        fright_detail = requested_shipment.ExpressFreightDetail
+        weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
 
-        # If you enclose a packing list with your freight shipment, this element
-        # informs FedEx operations that shipment contents can be verified on
-        # your packing list.
-        fright_detail.PackingListEnclosed = 1
+        package_weight = rate_request.create_wsdl_object_of_type('Weight')
+        package_weight.Value = float("%.2f" % self._get_total_weight(weight_uom))
+        package_weight.Units = "LB"
+        package = rate_request.create_wsdl_object_of_type('RequestedPackageLineItem')
+        package.Weight = package_weight
+        # Can be other values this is probably the most common
+        package.PhysicalPackaging = 'BOX'
+        package.GroupPackageCount = 1
 
-        fright_detail.BookingConfirmationNumber = 'Ref-%s' % self.reference
-
-        if self.is_international_shipping:
-            # Customs Clearance Detail
-            self.get_fedex_customs_details(rate_request)
-
-        # Label Specification
-        # Maybe make them as configurable items in later versions
-        requested_shipment.LabelSpecification.LabelFormatType = 'COMMON2D'
-        requested_shipment.LabelSpecification.ImageType = 'PNG'
-        requested_shipment.LabelSpecification.LabelStockType = 'PAPER_4X6'
-
-        requested_shipment.RateRequestTypes = ['ACCOUNT']
-
-        self.get_fedex_items_details(rate_request)
+        rate_request.add_package(package)
 
         try:
-            response = rate_request.send_request(int(self.id))
-        except RequestError, exc:
-            self.raise_user_error(
-                'fedex_rates_error', error_args=(exc.message, )
-            )
+            rate_request.send_request()
+        except FedexError, error:
+            self.raise_user_error("fedex_rates_error", error_args=(error, ))
 
-        currency, = Currency.search([
-            ('code', '=', str(
-                response.RateReplyDetails[0].RatedShipmentDetails[0].
-                ShipmentRateDetail.TotalNetCharge.Currency
-            ))
-        ])
-
-        return Decimal(str(
-            response.RateReplyDetails[0].RatedShipmentDetails[0].
-            ShipmentRateDetail.TotalNetCharge.Amount)
-        ), currency.id
-
-    def get_fedex_customs_details(self, fedex_request):
-        """
-        Computes the details of the customs items and passes to fedex request
-        """
-        ProductUom = Pool().get('product.uom')
-
-        customs_detail = fedex_request.get_element_from_type(
-            'CustomsClearanceDetail'
-        )
-        customs_detail.DocumentContent = 'DOCUMENTS_ONLY'
-
-        # Encoding Items for customs
-        commodities = []
-        customs_value = 0
-        for line in self.lines:
-            if line.product.type == 'service':
+        for rate_detail in rate_request.response.RateReplyDetails[0].RatedShipmentDetails:
+            if rate_detail.ShipmentRateDetail.TotalNetFedExCharge.Currency != self.currency.code:
                 continue
-
-            weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
-
-            from_address = self._get_ship_from_address()
-
-            commodity = fedex_request.get_element_from_type('Commodity')
-            commodity.NumberOfPieces = len(self.lines)
-            commodity.Name = line.product.name
-            commodity.Description = line.description
-            commodity.CountryOfManufacture = from_address.country.code
-            commodity.Weight.Units = 'LB'
-            commodity.Weight.Value = line.get_weight(weight_uom)
-            commodity.Quantity = int(line.product.quantity)
-            commodity.QuantityUnits = 'EA'
-            commodity.UnitPrice.Amount = int(line.unit_price)
-            commodity.UnitPrice.Currency = self.company.currency.code
-            commodity.CustomsValue.Currency = self.company.currency.code
-            commodity.CustomsValue.Amount = int(
-                Decimal(str(line.quantity)) * line.unit_price
-            )
-            commodities.append(commodity)
-            customs_value += Decimal(str(line.quantity)) * line.unit_price
-
-        customs_detail.CustomsValue.Currency = self.company.currency.code
-        customs_detail.CustomsValue.Amount = int(customs_value)
-
-        fedex_request.RequestedShipment.CustomsClearanceDetail = customs_detail
-        fedex_request.RequestedShipment.CustomsClearanceDetail.Commodities = \
-            commodities
-
-        # Commercial Invoice
-        customs_detail.CommercialInvoice.TermsOfSale = 'FOB_OR_FCA'
-        customs_detail.DutiesPayment.PaymentType = 'SENDER'
-        customs_detail.DutiesPayment.Payor.ResponsibleParty = \
-            fedex_request.RequestedShipment.Shipper
-
-    def get_fedex_items_details(self, fedex_request):
-        '''
-        Computes the details of the shipment items and passes to fedex request
-        '''
-        ProductUom = Pool().get('product.uom')
-
-        item = fedex_request.get_element_from_type(
-            'RequestedPackageLineItem'
-        )
-        weight_uom, = ProductUom.search([('symbol', '=', 'lb')])
-        item.SequenceNumber = 1
-        item.Weight.Units = 'LB'
-        item.Weight.Value = ProductUom.compute_qty(
-            self.weight_uom, self.package_weight, weight_uom
-        )
-
-        # From sale you cannot define packages per shipment, so single
-        # package per shipment.
-        item.GroupPackageCount = 1
-        fedex_request.RequestedShipment.PackageCount = 1
-
-        fedex_request.RequestedShipment.RequestedPackageLineItems = [item]
+            return Decimal(rate_detail.ShipmentRateDetail.TotalNetFedExCharge.Amount), self.currency.id
 
     def create_shipment(self, shipment_type):
         Shipment = Pool().get('stock.shipment.out')

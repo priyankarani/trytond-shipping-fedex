@@ -8,7 +8,7 @@ from trytond.pool import Pool
 from party import Address
 from carrier import FedexShipmentMethod, Carrier
 from sale import Configuration, Sale
-from stock import ShipmentOut, GenerateFedexLabelMessage, GenerateShippingLabel
+from stock import ShipmentOut, GenerateShippingLabel
 
 
 def register():
@@ -19,7 +19,6 @@ def register():
         Configuration,
         Sale,
         ShipmentOut,
-        GenerateFedexLabelMessage,
         module='shipping_fedex', type_='model'
     )
     Pool.register(
