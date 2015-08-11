@@ -150,6 +150,7 @@ class ShipmentOut:
         rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
         rate_request.RequestedShipment.ServiceType = self.fedex_service_type.value
         rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        rate_request.RequestedShipment.RateRequestTypes = "PREFERRED"
         rate_request.RequestedShipment.PreferredCurrency = self.cost_currency.code
 
         # Shipper's address
@@ -250,6 +251,10 @@ class ShipmentOut:
         ship_request.RequestedShipment.Recipient.Address.StateOrProvinceCode = self.delivery_address.subdivision.code[-2:]
         ship_request.RequestedShipment.Recipient.Address.PostalCode = self.delivery_address.zip
         ship_request.RequestedShipment.Recipient.Address.CountryCode = self.delivery_address.country.code
+
+        # Preferred currency
+        ship_request.RequestedShipment.RateRequestTypes = "PREFERRED"
+        ship_request.RequestedShipment.PreferredCurrency = self.cost_currency.code
 
         # This is needed to ensure an accurate rate quote with the response.
         ship_request.RequestedShipment.Recipient.Address.Residential = True
