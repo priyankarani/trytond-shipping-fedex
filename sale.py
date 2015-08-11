@@ -192,6 +192,7 @@ class Sale:
         rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
         rate_request.RequestedShipment.ServiceType = self.fedex_service_type.value
         rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        rate_request.RequestedShipment.RateRequestTypes = "PREFERRED"
         rate_request.RequestedShipment.PreferredCurrency = self.currency.code
 
         # Shipper's address
