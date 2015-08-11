@@ -10,6 +10,8 @@
             <field name="fedex_account_number"/>
             <label name="fedex_meter_number"/>
             <field name="fedex_meter_number"/>
+            <label name="fedex_is_test"/>
+            <field name="fedex_is_test"/>
         </group>
     </xpath>
 </data>
