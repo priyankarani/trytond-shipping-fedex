@@ -322,18 +322,12 @@ class ShipmentOut:
                     'resource': '%s,%s' % (self.__name__, self.id)
                 }])
 
-        currency, = Currency.search([
-            ('code', '=', str(
-                ship_request.response.CompletedShipmentDetail.ShipmentRating.ShipmentRateDetails[0].TotalNetCharge.Currency
-            ))
-        ])
-        self.__class__.write([self], {
-            'cost': Decimal(str(
-                ship_request.response.CompletedShipmentDetail.ShipmentRating.ShipmentRateDetails[0].TotalNetCharge.Amount
-            )),
-            'cost_currency': currency,
-            'tracking_number': master_tracking_number,
-        })
+        for rate_detail in ship_request.response.CompletedShipmentDetail.ShipmentRating.ShipmentRateDetails:
+            if rate_detail.TotalNetFedExCharge.Currency != self.cost_currency.code:
+                continue
+            self.cost = Decimal(str(rate_detail.TotalNetFedExCharge.Amount))
+            self.tracking_number = master_tracking_number
+            self.save()
 
         return master_tracking_number
 
