@@ -61,6 +61,20 @@ class ShipmentOut:
         },
         depends=['is_fedex_shipping', 'state']
     )
+    fedex_commercial_invoice_terms_of_sale = fields.Selection([
+        ('CFR_OR_CPT', 'CFR_OR_CPT'),
+        ('CIF_OR_CIP', 'CIF_OR_CIP'),
+        ("DAP", "DAP"),
+        ("DAT", "DAT"),
+        ("DDP", "DDP"),
+        ("DDU", "DDU"),
+        ("EXW", "EXW"),
+        ("FOB_OR_FCA", "FOB_OR_FCA"),
+    ], "Terms of Sale", )
+
+    @staticmethod
+    def default_fedex_commercial_invoice_terms_of_sale():
+        return "DDU"
 
     def get_is_fedex_shipping(self, name):
         """
@@ -199,7 +213,6 @@ class ShipmentOut:
 
         :return: Tracking number as string
         """
-        Currency = Pool().get('currency.currency')
         Attachment = Pool().get('ir.attachment')
         Uom = Pool().get('product.uom')
         Company = Pool().get('company.company')
@@ -376,9 +389,9 @@ class ShipmentOut:
         customs_detail.Commodities = commodities
 
         # Commercial Invoice
-        customs_detail.CommercialInvoice.TermsOfSale = 'FOB_OR_FCA'
         customs_detail.CommercialInvoice.TaxesOrMiscellaneousChargeType = 'OTHER'
         customs_detail.CommercialInvoice.Purpose = "SAMPLE"
+        customs_detail.CommercialInvoice.TermsOfSale = self.fedex_commercial_invoice_terms_of_sale
         customs_detail.DutiesPayment.PaymentType = 'SENDER'
         customs_detail.DutiesPayment.Payor = ship_request.RequestedShipment.ShippingChargesPayment.Payor
 
