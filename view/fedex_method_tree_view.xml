@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tree string="Fedex Shipment Method">
+    <field name="name"/>
+    <field name="active"/>
+    <field name="value"/>
+    <field name="method_type"/>
+</tree>

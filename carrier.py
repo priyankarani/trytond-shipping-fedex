@@ -25,6 +25,7 @@ class FedexShipmentMethod(ModelSQL, ModelView):
     __name__ = 'fedex.shipment.method'
 
     name = fields.Char('Name', required=True, select=True)
+    active = fields.Boolean('Active', select=True)
     value = fields.Char('Value', required=True, select=True)
     method_type = fields.Selection([
         ('dropoff', 'Drop Off Type'),
