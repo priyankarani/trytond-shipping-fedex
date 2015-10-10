@@ -121,20 +121,6 @@ class Sale:
         config = Config(1)
         return config.fedex_service_type and config.fedex_service_type.id
 
-    def _get_carrier_context(self):
-        "Pass sale in the context"
-        # XXX: This override should not be here, it should be in
-        # trytond-shipping
-
-        context = super(Sale, self)._get_carrier_context()
-
-        if not self.carrier.carrier_cost_method == 'fedex':
-            return context
-
-        context = context.copy()
-        context['sale'] = self.id
-        return context
-
     def on_change_lines(self):
         """Pass a flag in context which indicates the get_sale_price method
         of FedEx carrier not to calculate cost on each line change
