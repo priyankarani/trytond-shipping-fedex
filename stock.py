@@ -16,10 +16,6 @@ from fedex.services.rate_service import FedexRateServiceRequest
 from fedex.services.ship_service import FedexProcessShipmentRequest
 from fedex.base_service import FedexError
 
-import logging
-logging.basicConfig(level=logging.INFO)
-logging.getLogger('suds.client').setLevel(logging.DEBUG)
-
 __all__ = [
     'ShipmentOut', 'GenerateShippingLabel',
 ]
