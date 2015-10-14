@@ -31,27 +31,30 @@ class ShipmentOut:
         'get_is_fedex_shipping'
     )
     fedex_drop_off_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Drop-Off Type',
-        domain=[('method_type', '=', 'dropoff')],
-        states={
+        'carrier.service', 'Default Drop-Off Type',
+        domain=[
+            ('method_type', '=', 'dropoff'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
     fedex_packaging_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Packaging Type',
-        domain=[('method_type', '=', 'packaging')],
-        states={
+        'carrier.service', 'Default Packaging Type',
+        domain=[
+            ('method_type', '=', 'packaging'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
     fedex_service_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Service Type',
-        domain=[('method_type', '=', 'service')],
-        states={
+        'carrier.service', 'Default Service Type',
+        domain=[
+            ('method_type', '=', 'service'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
@@ -157,9 +160,9 @@ class ShipmentOut:
             self.raise_user_error('fedex_settings_missing')
 
         rate_request = FedexRateServiceRequest(fedex_credentials)
-        rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
-        rate_request.RequestedShipment.ServiceType = self.fedex_service_type.value
-        rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        rate_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.code
+        rate_request.RequestedShipment.ServiceType = self.fedex_service_type.code
+        rate_request.RequestedShipment.PackagingType = self.fedex_packaging_type.code
         rate_request.RequestedShipment.RateRequestTypes = "PREFERRED"
         rate_request.RequestedShipment.PreferredCurrency = self.cost_currency.code
 
@@ -225,9 +228,9 @@ class ShipmentOut:
         fedex_credentials = self.carrier.get_fedex_credentials()
 
         ship_request = FedexProcessShipmentRequest(fedex_credentials)
-        ship_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.value
-        ship_request.RequestedShipment.ServiceType = self.fedex_service_type.value
-        ship_request.RequestedShipment.PackagingType = self.fedex_packaging_type.value
+        ship_request.RequestedShipment.DropoffType = self.fedex_drop_off_type.code
+        ship_request.RequestedShipment.ServiceType = self.fedex_service_type.code
+        ship_request.RequestedShipment.PackagingType = self.fedex_packaging_type.code
 
         company = Company(Transaction().context.get('company'))
         shipper_address = self._get_ship_from_address()
