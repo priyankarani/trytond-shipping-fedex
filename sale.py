@@ -22,16 +22,16 @@ class Configuration:
     __name__ = 'sale.configuration'
 
     fedex_drop_off_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Drop-Off Type',
-        domain=[('method_type', '=', 'dropoff')],
+        'carrier.service', 'Default Drop-Off Type',
+        domain=[('method_type', '=', 'dropoff'), ('source', '=', 'fedex')],
     )
     fedex_packaging_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Packaging Type',
-        domain=[('method_type', '=', 'packaging')],
+        'carrier.service', 'Default Packaging Type',
+        domain=[('method_type', '=', 'packaging'), ('source', '=', 'fedex')],
     )
     fedex_service_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Service Type',
-        domain=[('method_type', '=', 'service')],
+        'carrier.service', 'Default Service Type',
+        domain=[('method_type', '=', 'service'), ('source', '=', 'fedex')],
     )
 
 
@@ -44,8 +44,8 @@ class Sale:
         'get_is_fedex_shipping',
     )
     fedex_drop_off_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Drop-Off Type',
-        domain=[('method_type', '=', 'dropoff')],
+        'carrier.service', 'Default Drop-Off Type',
+        domain=[('method_type', '=', 'dropoff'), ('source', '=', 'fedex')],
         states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': ~Eval('state').in_(['draft', 'quotation']),
@@ -53,8 +53,8 @@ class Sale:
         depends=['is_fedex_shipping', 'state']
     )
     fedex_packaging_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Packaging Type',
-        domain=[('method_type', '=', 'packaging')],
+        'carrier.service', 'Default Packaging Type',
+        domain=[('method_type', '=', 'packaging'), ('source', '=', 'fedex')],
         states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': ~Eval('state').in_(['draft', 'quotation']),
@@ -62,8 +62,8 @@ class Sale:
         depends=['is_fedex_shipping', 'state']
     )
     fedex_service_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Service Type',
-        domain=[('method_type', '=', 'service')],
+        'carrier.service', 'Default Service Type',
+        domain=[('method_type', '=', 'service'), ('source', '=', 'fedex')],
         states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': ~Eval('state').in_(['draft', 'quotation']),

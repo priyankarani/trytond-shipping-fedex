@@ -16,21 +16,38 @@ REQUIRED_IF_FEDEX = {
     'required': Eval('carrier_cost_method') == 'fedex',
 }
 
-__all__ = ['Carrier', 'FedexShipmentMethod']
+__all__ = ['Carrier', 'CarrierService']
 __metaclass__ = PoolMeta
 
 
-class FedexShipmentMethod(ModelSQL, ModelView):
-    "FedEx Shipment methods"
-    __name__ = 'fedex.shipment.method'
+class CarrierService:
+    "Carrier Service"
+    __name__ = 'carrier.service'
 
-    name = fields.Char('Name', required=True, select=True)
-    value = fields.Char('Value', required=True, select=True)
-    method_type = fields.Selection([
-        ('dropoff', 'Drop Off Type'),
-        ('packaging', 'Packaging Type'),
-        ('service', 'Service Type'),
-    ], 'Type', required=True, select=True)
+    @classmethod
+    def get_source(cls):
+        """
+        Get the source
+        """
+        sources = super(CarrierService, cls).get_source()
+
+        sources.append(('fedex', 'FedEx'))
+
+        return sources
+
+    @classmethod
+    def get_method_type(cls):
+        """
+        Get the method types for fedex
+        """
+        method_types = super(CarrierService, cls).get_method_type()
+
+        method_types.extend([
+            ('dropoff', 'Drop Off Type'),
+            ('packaging', 'Packaging Type'),
+            ('service', 'Service Type'),
+        ])
+        return method_types
 
 
 class Carrier:

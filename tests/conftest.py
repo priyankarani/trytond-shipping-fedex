@@ -79,7 +79,7 @@ def dataset(request):
     Uom = POOL.get('product.uom')
     Carrier = POOL.get('carrier')
     PaymentTerm = POOL.get('account.invoice.payment_term')
-    FedExShipmentMethod = POOL.get('fedex.shipment.method')
+    CarrierService = POOL.get('carrier.service')
     StockLocation = POOL.get('stock.location')
     SaleConfiguration = POOL.get('sale.configuration')
     AccountCreateChart = POOL.get('account.create_chart', type="wizard")
@@ -293,23 +293,26 @@ def dataset(request):
         }])
 
         def get_fedex_drop_off_type(value):
-            res, = FedExShipmentMethod.search([
+            res, = CarrierService.search([
                 ('method_type', '=', 'dropoff'),
                 ('value', '=', value),
+                ('source', '=', 'fedex'),
             ])
             return res.id
 
         def get_fedex_packaging_type(value):
-            res, = FedExShipmentMethod.search([
+            res, = CarrierService.search([
                 ('method_type', '=', 'packaging'),
                 ('value', '=', value),
+                ('source', '=', 'fedex')
             ])
             return res.id
 
         def get_fedex_service_type(value):
-            res, = FedExShipmentMethod.search([
+            res, = CarrierService.search([
                 ('method_type', '=', 'service'),
                 ('value', '=', value),
+                ('source', '=', 'fedex')
             ])
             return res.id
 

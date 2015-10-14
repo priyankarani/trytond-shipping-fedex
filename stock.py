@@ -31,27 +31,30 @@ class ShipmentOut:
         'get_is_fedex_shipping'
     )
     fedex_drop_off_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Drop-Off Type',
-        domain=[('method_type', '=', 'dropoff')],
-        states={
+        'carrier.service', 'Default Drop-Off Type',
+        domain=[
+            ('method_type', '=', 'dropoff'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
     fedex_packaging_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Packaging Type',
-        domain=[('method_type', '=', 'packaging')],
-        states={
+        'carrier.service', 'Default Packaging Type',
+        domain=[
+            ('method_type', '=', 'packaging'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
         depends=['is_fedex_shipping', 'state']
     )
     fedex_service_type = fields.Many2One(
-        'fedex.shipment.method', 'Default Service Type',
-        domain=[('method_type', '=', 'service')],
-        states={
+        'carrier.service', 'Default Service Type',
+        domain=[
+            ('method_type', '=', 'service'), ('source', '=', 'fedex')
+        ], states={
             'required': Eval('is_fedex_shipping', True),
             'readonly': Eval('state') == 'done',
         },
